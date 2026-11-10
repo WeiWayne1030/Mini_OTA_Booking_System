@@ -1,5 +1,6 @@
 using MiniOTA.Application;
 using MiniOTA.Infrastructure;
+using MiniOTA.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,6 +23,12 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
+
+    // 只在開發環境放種子資料（需要先套用 migration）
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    await InventorySeeder.SeedAsync(db, DateOnly.FromDateTime(DateTime.UtcNow));
+
 }
 
 app.UseHttpsRedirection();
