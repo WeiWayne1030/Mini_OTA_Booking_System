@@ -1,0 +1,24 @@
+name: miniota
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: miniota-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: miniota
+      POSTGRES_USER: miniota
+      # Set in docker/.env (not committed). See docker/.env.example.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in docker/.env}
+    ports:
+      - "5432:5432"
+    volumes:
+      - miniota-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U miniota -d miniota"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  miniota-postgres-data:

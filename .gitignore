@@ -1,0 +1,35 @@
+# Build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+TestResults/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userprefs
+
+# Local tooling and data
+.local/
+pgdata/
+pgsql/
+
+# Secrets and environment overrides (commit only *.example templates)
+.env
+.env.*
+!.env.example
+*.env
+appsettings.*.local.json
+appsettings.Local.json
+secrets.json
+*.pfx
+*.p12
+*.key
+*.pem
+*.snk
+launchSettings.local.json
+
+# Logs
+*.log
