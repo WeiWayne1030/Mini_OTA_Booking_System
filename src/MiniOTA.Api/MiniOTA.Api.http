@@ -1,6 +1,9 @@
-@MiniOTA.Api_HostAddress = http://localhost:5238
+﻿@MiniOTA.Api_HostAddress = http://localhost:5238
 
-GET {{MiniOTA.Api_HostAddress}}/weatherforecast/
+### Query availability (stay dates 2026-11-20, 21, 22)
+GET {{MiniOTA.Api_HostAddress}}/availability?checkInDate=2026-11-20&checkOutDate=2026-11-23&roomCount=2
 Accept: application/json
 
-###
+### Health check
+GET {{MiniOTA.Api_HostAddress}}/health
+Accept: application/json
