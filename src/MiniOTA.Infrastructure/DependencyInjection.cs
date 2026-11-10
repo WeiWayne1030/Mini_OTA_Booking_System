@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using MiniOTA.Infrastructure.Persistence;
+using MiniOTA.Application.Availability;
 
 namespace MiniOTA.Infrastructure;
 
@@ -18,6 +19,8 @@ public static class DependencyInjection
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseNpgsql(connectionString)
                    .UseSnakeCaseNamingConvention());
+
+        services.AddScoped<IInventoryReader, InventoryReader>();
 
         return services;
     }

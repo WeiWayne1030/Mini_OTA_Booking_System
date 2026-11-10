@@ -10,6 +10,7 @@ public static class DependencyInjection
         // Register Application Services here.
         // Example:
         // services.AddScoped<IReservationService, ReservationService>();
+        services.AddScoped<Availability.QueryAvailabilityHandler>();
 
         return services;
     }
