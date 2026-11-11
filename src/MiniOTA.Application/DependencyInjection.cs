@@ -11,6 +11,9 @@ public static class DependencyInjection
         // Example:
         // services.AddScoped<IReservationService, ReservationService>();
         services.AddScoped<Availability.QueryAvailabilityHandler>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton(new Reservations.ReservationOptions());
+        services.AddScoped<Reservations.CreateReservationHandler>();
 
         return services;
     }
