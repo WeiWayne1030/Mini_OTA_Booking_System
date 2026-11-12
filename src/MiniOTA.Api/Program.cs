@@ -44,3 +44,6 @@ app.MapGet("/health", () => Results.Ok(new
 }));
 
 app.Run();
+
+// 讓整合測試專案可以用 WebApplicationFactory<Program> 啟動 API
+public partial class Program { }

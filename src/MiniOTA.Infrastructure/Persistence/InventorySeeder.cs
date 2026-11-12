@@ -8,11 +8,11 @@ public static class InventorySeeder
     public static async Task SeedAsync(
         ApplicationDbContext db,
         DateOnly today,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int roomTypeId = 1,
+        int totalRooms = 10,
+        int days = 90)
     {
-        const int roomTypeId = 1;
-        const int totalRooms = 10;
-        const int days = 90;
 
         var end = today.AddDays(days);
 
