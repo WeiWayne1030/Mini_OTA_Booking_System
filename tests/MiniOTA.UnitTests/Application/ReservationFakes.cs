@@ -7,10 +7,20 @@ internal sealed class FakeReservationRepository : IReservationRepository
 {
     public List<Reservation> Reservations { get; } = new();
     public List<IdempotencyRecord> Records { get; } = new();
+    /// <summary>接下來有幾次冪等查詢要「裝作查不到」，模擬另一個請求尚未提交的瞬間。</summary>
+    public int HiddenLookups { get; set; }
 
     public Task<IdempotencyRecord?> FindIdempotencyAsync(
         string clientId, string key, CancellationToken cancellationToken)
-        => Task.FromResult(Records.FirstOrDefault(r => r.ClientId == clientId && r.Key == key));
+    {
+        if (HiddenLookups > 0)
+        {
+            HiddenLookups--;
+            return Task.FromResult<IdempotencyRecord?>(null);
+        }
+
+        return Task.FromResult(Records.FirstOrDefault(r => r.ClientId == clientId && r.Key == key));
+    }
 
     public Task<Reservation?> GetAsync(Guid id, CancellationToken cancellationToken)
         => Task.FromResult(Reservations.FirstOrDefault(r => r.Id == id));
@@ -47,6 +57,9 @@ internal sealed class FakeUnitOfWork : IUnitOfWork
     /// <summary>設成 true 就模擬「寫入資料庫時失敗」。</summary>
     public bool ThrowOnSave { get; set; }
 
+    /// <summary>設成 true 就模擬「寫入時資料庫發現相同冪等鍵已存在」。</summary>
+    public bool ThrowDuplicateOnSave { get; set; }
+
     public Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken)
     {
         var transaction = new FakeTransaction();
@@ -57,6 +70,12 @@ internal sealed class FakeUnitOfWork : IUnitOfWork
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         SaveCount++;
+
+        if (ThrowDuplicateOnSave)
+        {
+            throw new DuplicateIdempotencyKeyException();
+        }
+
         if (ThrowOnSave)
         {
             throw new InvalidOperationException("Simulated database failure.");

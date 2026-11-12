@@ -124,6 +124,51 @@ public class CreateReservationHandlerTests
         Assert.True(transaction.Disposed);
     }
 
+    [Fact]
+    public async Task DuplicateKeyDetectedOnSave_RollsBackAndReturnsWinnersResult() // BR-019
+    {
+        var handler = CreateHandler();
+
+        // 請求 A 先成功
+        var winner = await handler.HandleAsync(Command(), CancellationToken.None);
+
+        // 請求 B：一開始查不到 A 的紀錄（模擬兩者同時進來），
+        // 扣完庫存、準備寫入時，資料庫才發現主鍵重複
+        _repo.HiddenLookups = 1;
+        _uow.ThrowDuplicateOnSave = true;
+
+        var loser = await handler.HandleAsync(Command(), CancellationToken.None);
+
+        // B 拿到的是 A 的結果，而不是錯誤
+        Assert.Equal(CreateReservationOutcome.Replayed, loser.Outcome);
+        Assert.Equal(winner.ReservationId, loser.ReservationId);
+        Assert.Equal(winner.PaymentDeadlineUtc, loser.PaymentDeadlineUtc);
+
+        // B 確實嘗試過扣庫存（共 2 次），但它的交易沒有提交，所以那次扣除會被回滾
+        Assert.Equal(2, _reserver.CallCount);
+        var loserTransaction = _uow.Transactions[1];
+        Assert.False(loserTransaction.Committed);
+        Assert.True(loserTransaction.Disposed);
+    }
+
+    [Fact]
+    public async Task InsufficientInventory_ButSameKeyAlreadySucceeded_ReturnsReplayed() // FR-007
+    {
+        var handler = CreateHandler();
+        var winner = await handler.HandleAsync(Command(), CancellationToken.None);
+
+        // B 是 A 的重送：一開始查不到 A 的紀錄，而 A 已經拿走最後的房間，所以扣庫存失敗
+        _repo.HiddenLookups = 1;
+        _reserver.Result = false;
+
+        var result = await handler.HandleAsync(Command(), CancellationToken.None);
+
+        // 不能回報「庫存不足」，因為這個請求其實已經成功了
+        Assert.Equal(CreateReservationOutcome.Replayed, result.Outcome);
+        Assert.Equal(winner.ReservationId, result.ReservationId);
+        Assert.Single(_repo.Reservations);
+    }
+
     [Theory]
     [InlineData("", "key-1")]
     [InlineData("client-1", "")]

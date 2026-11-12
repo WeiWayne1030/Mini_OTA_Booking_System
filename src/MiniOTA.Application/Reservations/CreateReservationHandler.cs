@@ -27,7 +27,7 @@ public sealed class CreateReservationHandler
     }
 
     public async Task<CreateReservationResult> HandleAsync(
-        CreateReservationCommand command, CancellationToken ct)
+    CreateReservationCommand command, CancellationToken ct)
     {
         // 1. 驗證輸入（BR-002、BR-003、BR-018）
         if (string.IsNullOrWhiteSpace(command.ClientId)
@@ -44,37 +44,42 @@ public sealed class CreateReservationHandler
         var stay = new StayDateRange(command.CheckInDate, command.CheckOutDate);
         var requestHash = ComputeRequestHash(command);
 
-        // 之後任何一條路徑直接 return，交易沒有 Commit 就會自動回滾
+        try
+        {
+            return await TryCreateAsync(command, stay, requestHash, ct);
+        }
+        catch (DuplicateIdempotencyKeyException)
+        {
+            // 另一個相同鍵的請求搶先提交。我們的交易在離開 TryCreateAsync 時已回滾（庫存已還原），
+            // 這裡在「交易之外」重新查詢，回傳贏家的結果。
+            return await ResolveExistingAsync(command, requestHash, ct)
+                ?? throw new InvalidOperationException(
+                    "Duplicate idempotency key reported but no record was found.");
+        }
+    }
+
+    private async Task<CreateReservationResult> TryCreateAsync(
+        CreateReservationCommand command, StayDateRange stay, string requestHash, CancellationToken ct)
+    {
         await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
 
         // 2. 冪等檢查（FR-007、BR-019）
-        var existing = await _reservations.FindIdempotencyAsync(
-            command.ClientId, command.IdempotencyKey, ct);
-
+        var existing = await ResolveExistingAsync(command, requestHash, ct);
         if (existing is not null)
         {
-            if (existing.RequestHash != requestHash)
-            {
-                return new CreateReservationResult(CreateReservationOutcome.IdempotencyKeyConflict);
-            }
-
-            var original = await _reservations.GetAsync(existing.ReservationId, ct)
-                ?? throw new InvalidOperationException(
-                    $"Reservation {existing.ReservationId} referenced by idempotency record was not found.");
-
-            return new CreateReservationResult(
-                CreateReservationOutcome.Replayed,
-                original.Id,
-                original.PaymentDeadlineUtc);
+            return existing;
         }
 
-        // 3. 原子扣庫存：每一晚都成功，或全部不動（BR-010）
+        // 3. 原子扣庫存（BR-010）
         var reserved = await _inventory.TryReserveAsync(
             command.RoomTypeId, stay, command.RoomCount, ct);
 
         if (!reserved)
         {
-            return new CreateReservationResult(CreateReservationOutcome.InsufficientInventory);
+            // 庫存不足，但也可能是「相同鍵的另一個請求剛成功、拿走了最後的房間」。
+            // 再查一次，才不會把一個其實已經成功的請求回報成失敗。
+            return await ResolveExistingAsync(command, requestHash, ct)
+                ?? new CreateReservationResult(CreateReservationOutcome.InsufficientInventory);
         }
 
         // 4. 建立預約與冪等紀錄，與扣庫存放在同一個交易（BR-011）
@@ -93,6 +98,33 @@ public sealed class CreateReservationHandler
             CreateReservationOutcome.Created,
             reservation.Id,
             reservation.PaymentDeadlineUtc);
+    }
+
+    // 有紀錄就回傳結果（重播或衝突），沒有紀錄回傳 null
+    private async Task<CreateReservationResult?> ResolveExistingAsync(
+        CreateReservationCommand command, string requestHash, CancellationToken ct)
+    {
+        var existing = await _reservations.FindIdempotencyAsync(
+            command.ClientId, command.IdempotencyKey, ct);
+
+        if (existing is null)
+        {
+            return null;
+        }
+
+        if (existing.RequestHash != requestHash)
+        {
+            return new CreateReservationResult(CreateReservationOutcome.IdempotencyKeyConflict);
+        }
+
+        var original = await _reservations.GetAsync(existing.ReservationId, ct)
+            ?? throw new InvalidOperationException(
+                $"Reservation {existing.ReservationId} referenced by idempotency record was not found.");
+
+        return new CreateReservationResult(
+            CreateReservationOutcome.Replayed,
+            original.Id,
+            original.PaymentDeadlineUtc);
     }
 
     // 只納入「影響預約內容」的欄位；冪等鍵本身與 ClientId 不算
