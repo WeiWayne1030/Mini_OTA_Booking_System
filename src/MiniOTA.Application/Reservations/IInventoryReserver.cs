@@ -16,4 +16,11 @@ public interface IInventoryReserver
         StayDateRange stay,
         int rooms,
         CancellationToken cancellationToken);
+
+    /// <summary> 說明:Reserved 轉成 Confirmed、全部成功才回 true、失敗時呼叫端要回滾。</summary>
+    Task<bool> TryConfirmAsync(
+    int roomTypeId,
+    StayDateRange stay,
+    int rooms,
+    CancellationToken cancellationToken);
 }

@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using MiniOTA.Domain;
 
@@ -28,7 +28,8 @@ public sealed class ReservationConfiguration : IEntityTypeConfiguration<Reservat
         builder.Property(x => x.CreatedAtUtc).HasColumnType("timestamp with time zone");
         builder.Property(x => x.UpdatedAtUtc).HasColumnType("timestamp with time zone");
 
-        // Optimistic concurrency via PostgreSQL's system column xmin.
+
+        //xmin為版本編號識別樂觀鎖
         builder.Property(x => x.Version)
             .HasColumnName("xmin")
             .HasColumnType("xid")

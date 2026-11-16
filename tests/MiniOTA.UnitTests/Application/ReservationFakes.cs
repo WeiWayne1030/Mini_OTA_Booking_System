@@ -37,12 +37,22 @@ internal sealed class FakeInventoryReserver : IInventoryReserver
 
     public int CallCount { get; private set; }
 
+    public int ConfirmCallCount { get; private set; }
+
     public (int RoomTypeId, StayDateRange Stay, int Rooms)? LastCall { get; private set; }
 
     public Task<bool> TryReserveAsync(
         int roomTypeId, StayDateRange stay, int rooms, CancellationToken cancellationToken)
     {
         CallCount++;
+        LastCall = (roomTypeId, stay, rooms);
+        return Task.FromResult(Result);
+    }
+
+    public Task<bool> TryConfirmAsync(
+    int roomTypeId, StayDateRange stay, int rooms, CancellationToken cancellationToken)
+    {
+        ConfirmCallCount++;
         LastCall = (roomTypeId, stay, rooms);
         return Task.FromResult(Result);
     }

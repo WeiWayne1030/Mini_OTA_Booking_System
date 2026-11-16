@@ -14,6 +14,7 @@ public static class DependencyInjection
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton(new Reservations.ReservationOptions());
         services.AddScoped<Reservations.CreateReservationHandler>();
+        services.AddScoped<Reservations.ConfirmReservationHandler>();
 
         return services;
     }
