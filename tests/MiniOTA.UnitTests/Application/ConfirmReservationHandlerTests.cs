@@ -126,21 +126,81 @@ public class ConfirmReservationHandlerTests
         Assert.Equal(0, _reserver.ConfirmCallCount);
     }
 
-    //庫存轉換失敗
+    // ---------- 同時付款：輸家回滾後重新判斷（AC-007、BR-016） ----------
+
+    //已確認
     [Fact]
-    public async Task InventoryConversionFails_Throws_AndDoesNotCommit() // BR-012
+    public async Task InventoryConversionFails_WhenReservationIsNowConfirmed_ReturnsAlreadyConfirmed()
     {
         var reservation = AddPendingReservation();
-        _reserver.Result = false; // 模擬庫存轉不動
+        _reserver.Result = false; // 輸家的庫存轉換被贏家搶先了
+
+        // 假的 repository 存的是同一個物件：handler 呼叫 Confirm() 之後它已是 Confirmed，
+        // 等同於「重新查詢時，資料庫顯示贏家已經確認」
+        var result = await CreateHandler().HandleAsync(
+            new ConfirmReservationCommand(reservation.Id), CancellationToken.None);
+
+        Assert.Equal(ConfirmReservationOutcome.AlreadyConfirmed, result.Outcome);
+        Assert.Equal(reservation.Id, result.ReservationId);
+
+        var transaction = Assert.Single(_uow.Transactions);
+        Assert.False(transaction.Committed); // 輸家的交易必須回滾
+        Assert.True(transaction.Disposed);
+        Assert.Equal(1, _uow.ClearTrackedChangesCount); // 重新查詢之前，要先丟掉過時的記憶體狀態
+    }
+
+    //已取消
+    [Fact]
+    public async Task InventoryConversionFails_WhenReservationWasCancelledMeanwhile_ReturnsNotConfirmable()
+    {
+        var reservation = AddPendingReservation();
+        _reserver.Result = false;
+        _reserver.OnTryConfirm = () => reservation.Cancel(Now.UtcDateTime); // 輸家在等待時，別人取消了預約
+
+        var result = await CreateHandler().HandleAsync(
+            new ConfirmReservationCommand(reservation.Id), CancellationToken.None);
+
+        Assert.Equal(ConfirmReservationOutcome.NotConfirmable, result.Outcome);
+        Assert.False(Assert.Single(_uow.Transactions).Committed);
+    }
+
+    //仍是待付款
+    [Fact]
+    public async Task InventoryConversionFails_WhileReservationIsStillPending_Throws() // 真正的資料不一致
+    {
+        var reservation = AddPendingReservation();
+        _reserver.Result = false;
+
+        // 回滾後重新查詢，資料庫顯示這筆預約「仍是待付款」，這與「庫存轉不動」互相矛盾
+        var stillPending = Reservation.CreatePending(
+            roomTypeId: 1,
+            stay: new StayDateRange(new DateOnly(2026, 12, 1), new DateOnly(2026, 12, 3)),
+            roomCount: 2,
+            nowUtc: Now.UtcDateTime,
+            paymentTimeout: PaymentTimeout);
+        _repo.GetOverride = (_, call) => call == 1 ? reservation : stillPending;
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             CreateHandler().HandleAsync(
                 new ConfirmReservationCommand(reservation.Id), CancellationToken.None));
 
         Assert.Equal(0, _uow.SaveCount);
-        var transaction = Assert.Single(_uow.Transactions);
-        Assert.False(transaction.Committed);
-        Assert.True(transaction.Disposed);
+        Assert.False(Assert.Single(_uow.Transactions).Committed);
+        Assert.Equal(1, _uow.ClearTrackedChangesCount);
+    }
+
+    [Fact]
+    public async Task SaveChangesConflict_ReturnsAlreadyConfirmed_AndRollsBack() // xmin 並發衝突
+    {
+        var reservation = AddPendingReservation();
+        _uow.ThrowConflictOnSave = true; // 存預約時發現它已經被贏家改過
+
+        var result = await CreateHandler().HandleAsync(
+            new ConfirmReservationCommand(reservation.Id), CancellationToken.None);
+
+        Assert.Equal(ConfirmReservationOutcome.AlreadyConfirmed, result.Outcome);
+        Assert.False(Assert.Single(_uow.Transactions).Committed);
+        Assert.Equal(1, _uow.ClearTrackedChangesCount);
     }
 
     //commit失敗

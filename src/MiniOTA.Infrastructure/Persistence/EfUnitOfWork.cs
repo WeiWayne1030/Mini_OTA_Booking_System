@@ -24,6 +24,12 @@ public sealed class EfUnitOfWork : IUnitOfWork
         {
             await _db.SaveChangesAsync(cancellationToken);
         }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            //付款、取消、過期的競爭
+            _db.ChangeTracker.Clear();
+            throw new ConcurrencyConflictException(ex);
+        }
         catch (DbUpdateException ex) when (IsIdempotencyKeyViolation(ex))
         {
             // 失敗的實體還留在 EF 的追蹤清單裡，不清掉會影響之後同一個 DbContext 的操作
@@ -32,10 +38,12 @@ public sealed class EfUnitOfWork : IUnitOfWork
         }
     }
 
+    public void ClearTrackedChanges() => _db.ChangeTracker.Clear();
+
     private static bool IsIdempotencyKeyViolation(DbUpdateException ex) =>
         ex.InnerException is PostgresException
         {
-            SqlState: PostgresErrorCodes.UniqueViolation,   // 23505：唯一性違反
+            SqlState: PostgresErrorCodes.UniqueViolation,   // 唯一性違反
             ConstraintName: "pk_idempotency_keys"           // 只翻譯「這一個」約束
         };
 }

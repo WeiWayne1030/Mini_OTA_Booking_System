@@ -22,8 +22,18 @@ internal sealed class FakeReservationRepository : IReservationRepository
         return Task.FromResult(Records.FirstOrDefault(r => r.ClientId == clientId && r.Key == key));
     }
 
+    /// <summary>覆寫查詢結果：參數是 (編號, 第幾次查詢)。用來模擬「回滾後重新查詢，資料庫顯示的是另一個狀態」。</summary>
+    public Func<Guid, int, Reservation?>? GetOverride { get; set; }
+
+    private int _getCalls;
+
     public Task<Reservation?> GetAsync(Guid id, CancellationToken cancellationToken)
-        => Task.FromResult(Reservations.FirstOrDefault(r => r.Id == id));
+    {
+        _getCalls++;
+        return GetOverride is not null
+            ? Task.FromResult(GetOverride(id, _getCalls))
+            : Task.FromResult(Reservations.FirstOrDefault(r => r.Id == id));
+    }
 
     public void Add(Reservation reservation) => Reservations.Add(reservation);
 
@@ -49,11 +59,15 @@ internal sealed class FakeInventoryReserver : IInventoryReserver
         return Task.FromResult(Result);
     }
 
+    /// <summary>在庫存轉換的瞬間執行的動作，用來模擬「這時別人剛好改了預約」。</summary>
+    public Action? OnTryConfirm { get; set; }
+
     public Task<bool> TryConfirmAsync(
     int roomTypeId, StayDateRange stay, int rooms, CancellationToken cancellationToken)
     {
         ConfirmCallCount++;
         LastCall = (roomTypeId, stay, rooms);
+        OnTryConfirm?.Invoke();
         return Task.FromResult(Result);
     }
 }
@@ -70,6 +84,8 @@ internal sealed class FakeUnitOfWork : IUnitOfWork
     /// <summary>設成 true 就模擬「寫入時資料庫發現相同冪等鍵已存在」。</summary>
     public bool ThrowDuplicateOnSave { get; set; }
 
+    public int ClearTrackedChangesCount { get; private set; }
+
     public Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken)
     {
         var transaction = new FakeTransaction();
@@ -77,9 +93,17 @@ internal sealed class FakeUnitOfWork : IUnitOfWork
         return Task.FromResult<IUnitOfWorkTransaction>(transaction);
     }
 
+    /// <summary>設成 true 就模擬「存檔時發現預約已被別人改過（xmin 衝突）」。</summary>
+    public bool ThrowConflictOnSave { get; set; }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         SaveCount++;
+
+        if (ThrowConflictOnSave)
+        {
+            throw new ConcurrencyConflictException();
+        }
 
         if (ThrowDuplicateOnSave)
         {
@@ -93,6 +117,13 @@ internal sealed class FakeUnitOfWork : IUnitOfWork
 
         return Task.CompletedTask;
     }
+
+    //1.	輸家讀到預約（Pending），EF 把這個物件放進追蹤清單。
+    //2.	輸家呼叫 reservation.Confirm()，記憶體裡的物件狀態變成 Confirmed。
+    //3.	輸家的交易因為衝突而回滾，資料庫沒有被改。
+    //4.	輸家要重新查詢這筆預約，看資料庫的真實狀態，但 EF 回給它的是追蹤清單裡的舊物件，上面寫著「Confirmed」，那是輸家自己在記憶體裡改的，不是資料庫的真相。
+    //      如果這時候真實狀態其實是 Cancelled（別人剛取消），輸家卻以為是 Confirmed，就會誤判。所以回滾之後要先把追蹤清單清空，再重新查，才會真的去問資料庫。
+    public void ClearTrackedChanges() => ClearTrackedChangesCount++;
 }
 
 internal sealed class FakeTransaction : IUnitOfWorkTransaction
