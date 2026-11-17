@@ -10,9 +10,15 @@ namespace MiniOTA.Api.Controllers;
 public class ReservationsController : ControllerBase
 {
     private readonly CreateReservationHandler _createHandler;
+    private readonly ConfirmReservationHandler _confirmHandler;
 
-    public ReservationsController(CreateReservationHandler createHandler)
-        => _createHandler = createHandler;
+    public ReservationsController(
+        CreateReservationHandler createHandler,
+        ConfirmReservationHandler confirmHandler)
+    {
+        _createHandler = createHandler;
+        _confirmHandler = confirmHandler;
+    }
 
     [HttpPost]
     [ProducesResponseType(typeof(CreateReservationResponse), StatusCodes.Status201Created)]
@@ -70,6 +76,39 @@ public class ReservationsController : ControllerBase
                 Status = StatusCodes.Status400BadRequest
             });
         }
+    }
+
+    [HttpPost("{id:guid}/pay")]
+    [ProducesResponseType(typeof(PayReservationResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Pay(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await _confirmHandler.HandleAsync(
+            new ConfirmReservationCommand(id), cancellationToken);
+
+        return result.Outcome switch
+        {
+            // 重複付款不是錯誤，和第一次付款回一樣的結果（付款是冪等的）
+            ConfirmReservationOutcome.Confirmed or ConfirmReservationOutcome.AlreadyConfirmed =>
+                Ok(new PayReservationResponse(
+                    result.ReservationId!.Value,
+                    nameof(ReservationStatus.Confirmed))),
+
+            ConfirmReservationOutcome.NotFound =>
+                Problem(
+                    title: "Reservation not found",
+                    detail: $"No reservation with id {id}.",
+                    statusCode: StatusCodes.Status404NotFound),
+
+            ConfirmReservationOutcome.NotConfirmable =>
+                Problem(
+                    title: "Reservation cannot be paid",
+                    detail: "The reservation has expired, was cancelled, or its payment deadline has passed.",
+                    statusCode: StatusCodes.Status409Conflict),
+
+            _ => throw new InvalidOperationException($"Unhandled outcome: {result.Outcome}")
+        };
     }
 
     // Created / Replayed 一定有編號與期限

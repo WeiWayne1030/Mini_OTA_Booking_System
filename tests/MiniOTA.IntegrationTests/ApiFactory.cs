@@ -4,6 +4,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using MiniOTA.Infrastructure.Persistence;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace MiniOTA.IntegrationTests;
 
@@ -27,11 +29,18 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     }
 
     public static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow);
+    public AdjustableTimeProvider Clock { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         // 用 Testing 環境：Program.cs 只在 Development 才會塞種子資料與開 Swagger
         builder.UseEnvironment("Testing");
+        // 用可調整的時鐘取代正式的 TimeProvider.System，讓測試可以快轉時間
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<TimeProvider>();
+            services.AddSingleton<TimeProvider>(Clock);
+        });
 
         // 讓 API 連到測試資料庫，而不是開發用的資料庫
         builder.UseSetting("ConnectionStrings:DefaultConnection", _connectionString);
@@ -40,6 +49,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     /// <summary>套用 migration、清空所有資料表，並重新建立「今天起 days 天」的庫存。</summary>
     public async Task ResetAsync(int roomsPerDay = 10, int days = 30)
     {
+        Clock.Reset(); //測試開始時時鐘歸零
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
