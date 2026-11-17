@@ -9,12 +9,10 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace MiniOTA.IntegrationTests;
 
-public class PaymentApiTests : IClassFixture<ApiFactory>
+public class PaymentApiTests : ApiTestBase
 {
-    private const int RoomTypeId = 1;
-    private readonly ApiFactory _factory;
 
-    public PaymentApiTests(ApiFactory factory) => _factory = factory;
+    public PaymentApiTests(ApiFactory factory) : base(factory) { }
 
     [Fact]
     public async Task Pay_PendingReservation_Returns200_AndMovesInventoryFromReservedToConfirmed() // FR-003、BR-007
@@ -185,49 +183,7 @@ public class PaymentApiTests : IClassFixture<ApiFactory>
             string.Join(" | ", failures.Select(f => f.Error ?? f.Status.ToString()).Distinct()));
     }
 
-    // ---------- 輔助方法（6-5 會把它們和 ReservationApiTests 的重複部分整理成共用） ----------
-
-    private static DateOnly Day(int offsetFromToday) => ApiFactory.Today.AddDays(offsetFromToday);
-
-    private static async Task<CreateReservationResponse> CreateReservationAsync(
-        HttpClient client, string key, DateOnly checkIn, DateOnly checkOut, int rooms)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Post, "/reservations")
-        {
-            Content = JsonContent.Create(new
-            {
-                checkInDate = checkIn,
-                checkOutDate = checkOut,
-                roomCount = rooms
-            })
-        };
-        request.Headers.Add("Idempotency-Key", key);
-
-        var response = await client.SendAsync(request);
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode); // 前置條件必須成功
-
-        var body = await response.Content.ReadFromJsonAsync<CreateReservationResponse>();
-        Assert.NotNull(body);
-        return body;
-    }
-
-    private async Task<T> WithDbAsync<T>(Func<ApplicationDbContext, Task<T>> query)
-    {
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        return await query(db);
-    }
-
-    private Task<DailyInventory> InventoryAsync(DateOnly date) =>
-        WithDbAsync(db => db.DailyInventories.AsNoTracking()
-            .SingleAsync(x => x.RoomTypeId == RoomTypeId && x.StayDate == date));
-
-    private Task<Reservation> ReservationAsync(Guid id) =>
-        WithDbAsync(db => db.Reservations.AsNoTracking().SingleAsync(r => r.Id == id));
-
-    private Task<int> InvariantViolationsAsync() =>
-        WithDbAsync(db => db.DailyInventories
-            .CountAsync(x => x.Total != x.Available + x.Reserved + x.Confirmed));
+    // ---------- 輔助方法----------
 
     // 暖機：先走過一次完整的「建立 + 並發付款」，讓連線池與程式碼路徑都就緒。
     // 否則第一個請求會在其他請求還在等連線時就完成，測試等於沒有真的在比賽。

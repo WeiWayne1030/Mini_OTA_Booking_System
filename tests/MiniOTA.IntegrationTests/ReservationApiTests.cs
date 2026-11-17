@@ -8,59 +8,10 @@ using MiniOTA.Infrastructure.Persistence;
 
 namespace MiniOTA.IntegrationTests;
 
-public class ReservationApiTests : IClassFixture<ApiFactory>
+public class ReservationApiTests : ApiTestBase
 {
-    private const int RoomTypeId = 1;
-    private readonly ApiFactory _factory;
-
-    public ReservationApiTests(ApiFactory factory) => _factory = factory;
-
-    // ---------- 輔助方法 ----------
-
-    private static DateOnly Day(int offsetFromToday) => ApiFactory.Today.AddDays(offsetFromToday);
-
-    private static Task<HttpResponseMessage> PostAsync(
-        HttpClient client, string? key, DateOnly checkIn, DateOnly checkOut, int rooms)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Post, "/reservations")
-        {
-            Content = JsonContent.Create(new
-            {
-                checkInDate = checkIn,
-                checkOutDate = checkOut,
-                roomCount = rooms
-            })
-        };
-
-        if (key is not null)
-        {
-            request.Headers.Add("Idempotency-Key", key);
-        }
-
-        return client.SendAsync(request);
-    }
-
-    private async Task<T> WithDbAsync<T>(Func<ApplicationDbContext, Task<T>> query)
-    {
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        return await query(db);
-    }
-
-    private Task<DailyInventory> InventoryAsync(DateOnly date) =>
-        WithDbAsync(db => db.DailyInventories.AsNoTracking()
-            .SingleAsync(x => x.RoomTypeId == RoomTypeId && x.StayDate == date));
-
-    private Task<int> ReservationCountAsync() =>
-        WithDbAsync(db => db.Reservations.CountAsync());
-
-    // BR-004：任何一列都必須滿足 Total = Available + Reserved + Confirmed
-    private Task<int> InvariantViolationsAsync() =>
-        WithDbAsync(db => db.DailyInventories
-            .CountAsync(x => x.Total != x.Available + x.Reserved + x.Confirmed));
-
-    private static Dictionary<HttpStatusCode, int> CountByStatus(IEnumerable<HttpResponseMessage> responses) =>
-        responses.GroupBy(r => r.StatusCode).ToDictionary(g => g.Key, g => g.Count());
+    //base(factory)： 子類別的建構子把收到的工廠交給基底類別的建構子，基底類別再存進 _factory。
+    public ReservationApiTests(ApiFactory factory) : base(factory){}
 
     // ---------- 基本流程 ----------
 
